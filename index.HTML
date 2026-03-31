@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>MilkMart - Fresh Milk Delivery</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,600;14..32,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+        body {
+            background: linear-gradient(135deg, #0b3b2f 0%, #1b5e3f 50%, #2e7d32 100%);
+            position: relative;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        .bubble {
+            position: fixed;
+            background: rgba(255,255,255,0.15);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: -1;
+            animation: floatBubble 15s infinite linear;
+            box-shadow: 0 0 20px rgba(255,255,255,0.3);
+        }
+        @keyframes floatBubble {
+            from { transform: translateY(100vh) rotate(0deg); }
+            to { transform: translateY(-100vh) rotate(360deg); }
+        }
+        .product-card {
+            transition: transform 0.2s, box-shadow 0.2s;
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(2px);
+        }
+        .product-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.02);
+        }
+        .modal-backdrop {
+            background: rgba(0,0,0,0.5);
+            backdrop-filter: blur(4px);
+        }
+        .order-status-badge {
+            @apply px-2 py-1 text-xs font-semibold rounded-full;
+        }
+        .status-pending { background: #fef3c7; color: #b45309; }
+        .status-shipped { background: #dbeafe; color: #1e40af; }
+        .status-delivered { background: #d1fae5; color: #065f46; }
+        .admin-table tr { border-bottom: 1px solid #e5e7eb; }
+        .admin-table td, .admin-table th { padding: 12px 8px; text-align: left; }
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .full-page-welcome {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1e5f3e, #2e7d32);
+            z-index: 2000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            animation: fadeOut 2s ease-in forwards;
+            pointer-events: none;
+        }
+        @keyframes fadeOut {
+            0% { opacity: 1; visibility: visible; }
+            70% { opacity: 1; }
+            100% { opacity: 0; visibility: hidden; }
+        }
+        .full-page-thankyou {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #0b3b2f, #1b5e3f);
+            z-index: 2000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            animation: fadeOut 2s ease-in forwards;
+            pointer-events: none;
+        }
+        .delivery-order-card {
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(2px);
+        }
+        .call-btn, .direction-btn, .pickup-btn {
+            transition: all 0.2s;
+        }
+        .call-btn:hover, .direction-btn:hover, .pickup-btn:hover {
+            transform: scale(1.05);
+        }
+        .admin-tab {
+            transition: all 0.2s;
+        }
+        .admin-tab.active {
+            background: #2e7d32;
+            color: white;
+        }
+        .notification-badge {
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        #map {
+            height: 200px;
+            border-radius: 8px;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Floating bubbles -->
+    <script>
+        for (let i = 0; i < 25; i++) {
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble';
+            const size = Math.random() * 80 + 40;
+            bubble.style.width = size + 'px';
+            bubble.style.height = size + 'px';
+            bubble.style.left = Math.random() * 100 + '%';
+            bubble.style.animationDelay = Math.random() * 15 + 's';
+            bubble.style.animationDuration = 18 + Math.random() * 12 + 's';
+            document.body.appendChild(bubble);
+        }
+    </script>
+
+    <!-- Navigation -->
+    <nav class="bg-white/90 backdrop-blur-md shadow-md sticky top-0 z-50">
+        <div class="container mx-auto px-4 py-3 flex flex-wrap items-center justify-between">
+            <div class="flex items-center space-x-2 cursor-pointer" onclick="showHome()">
+                <i class="fas fa-tint text-green-600 text-2xl"></i>
+                <span class="text-2xl font-bold text-green-600">MilkMart</span>
+            </div>
+            <div id="navButtons" class="flex items-center space-x-4">
+                <button id="navHome" onclick="showHome()" class="text-gray-700 hover:text-green-600">Home</button>
+                <button id="navCart" onclick="showCart()" class="relative text-gray-700 hover:text-green-600">
+                    <i class="fas fa-shopping-cart text-xl"></i>
+                    <span id="cartCount" class="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">0</span>
+                </button>
+                <button id="navWishlist" onclick="showWishlist()" class="relative text-gray-700 hover:text-green-600">
+                    <i class="fas fa-heart text-xl"></i>
+                    <span id="wishlistCount" class="absolute -top-2 -right-2 bg-pink-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">0</span>
+                </button>
+                <button id="navOrders" onclick="showOrders()" class="text-gray-700 hover:text-green-600">Orders</button>
+                <button id="adminBtn" onclick="toggleAdmin()" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded-full text-sm hidden">Admin</button>
+                <div id="authSection">
+                    <button id="loginBtn" onclick="showLogin()" class="bg-green-600 text-white px-4 py-1 rounded hover:bg-green-700">Login</button>
+                    <button id="logoutBtn" onclick="logout()" class="hidden bg-red-600 text-white px-4 py-1 rounded hover:bg-red-700">Logout</button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main id="app" class="container mx-auto px-4 py-8 min-h-[70vh]"></main>
+
+    <!-- Login Modal -->
+    <div id="loginModal" class="fixed inset-0 flex items-center justify-center z-50 hidden modal-backdrop">
+        <div class="bg-white rounded-2xl p-6 w-96 max-w-full shadow-2xl">
+            <h2 class="text-2xl font-bold mb-4">Welcome Back</h2>
+            <input type="email" id="loginEmail" placeholder="Email" class="w-full border rounded-lg p-2 mb-3 focus:ring-2 focus:ring-green-400 outline-none">
+            <input type="password" id="loginPassword" placeholder="Password" class="w-full border rounded-lg p-2 mb-4 focus:ring-2 focus:ring-green-400 outline-none">
+            <button onclick="doLogin()" class="bg-green-600 text-white px-4 py-2 rounded-lg w-full hover:bg-green-700">Login</button>
+            <p class="mt-3 text-center text-gray-600">New user? <button onclick="showRegister()" class="text-green-600 font-medium">Create account</button></p>
+            <button onclick="closeModal()" class="absolute top-3 right-3 text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+    </div>
+
+    <!-- Register Modal (with email verification) -->
+    <div id="registerModal" class="fixed inset-0 flex items-center justify-center z-50 hidden modal-backdrop">
+        <div class="bg-white rounded-2xl p-6 w-96 max-w-full shadow-2xl">
+            <h2 class="text-2xl font-bold mb-4">Create Account</h2>
+            <input type="text" id="regName" placeholder="Full Name" class="w-full border rounded-lg p-2 mb-3 focus:ring-2 focus:ring-green-400 outline-none">
+            <input type="email" id="regEmail" placeholder="Email" class="w-full border rounded-lg p-2 mb-3 focus:ring-2 focus:ring-green-400 outline-none">
+            <input type="password" id="regPassword" placeholder="Password" class="w-full border rounded-lg p-2 mb-4 focus:ring-2 focus:ring-green-400 outline-none">
+            <button onclick="sendVerificationCode()" class="bg-blue-600 text-white px-4 py-2 rounded-lg w-full hover:bg-blue-700">Send Verification Code</button>
+            <div id="verificationSection" style="display:none;" class="mt-3">
+                <input type="text" id="verificationCode" placeholder="Enter 6-digit code" class="w-full border rounded-lg p-2 mb-2">
+                <button onclick="verifyAndRegister()" class="bg-green-600 text-white px-4 py-2 rounded-lg w-full">Verify & Register</button>
+            </div>
+            <button onclick="closeModal()" class="absolute top-3 right-3 text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+    </div>
+
+    <script>
+        // ---------- DATA ----------
+        let products = [];
+        let users = [];
+        let orders = [];
+        let cart = [];
+        let wishlist = [];
+        let currentUser = null;
+        let adminMode = false;
+        let unreadOrderCount = 0;
+        let map = null, marker = null, currentLocation = null;
+        let pendingVerification = { email: null, code: null, name: null, password: null };
+
+        // EmailJS configuration (user provided)
+        const EMAILJS_SERVICE_ID = " service_ivc7uqe";
+        const EMAILJS_TEMPLATE_ID = " template_ax4pf0a";
+        const EMAILJS_PUBLIC_KEY = "4-d0HMkXeC3dtDEYH "; // User must replace with actual public key
+        emailjs.init(EMAILJS_PUBLIC_KEY);
+
+        function sendEmail(toEmail, name, code) {
+            // Using template variables
+            return emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+                to_email: toEmail,
+                name: name,
+                code: code
+            });
+        }
+
+        function generateCode() { return Math.floor(100000 + Math.random() * 900000).toString(); }
+
+        function sendVerificationCode() {
+            const name = document.getElementById('regName').value;
+            const email = document.getElementById('regEmail').value;
+            const password = document.getElementById('regPassword').value;
+            if (!name || !email || !password) return showToast("All fields required", 'error');
+            // Basic email format validation
+            if (!/^\S+@\S+\.\S+$/.test(email)) {
+                showToast("Invalid email address format", 'error');
+                return;
+            }
+            if (users.find(u => u.email === email)) {
+                showToast("Email already registered", 'error');
+                return;
+            }
+            const code = generateCode();
+            pendingVerification = { email, name, password, code };
+            sendEmail(email, name, code)
+                .then(() => {
+                    showToast("Verification code sent to your email", 'success');
+                    document.getElementById('verificationSection').style.display = 'block';
+                })
+                .catch(err => {
+                    console.error("Email send failed:", err);
+                    // Show fallback alert with code
+                    alert(`[Demo] Verification code: ${code}\nPlease enter it below. (Email could not be sent - check EmailJS config)`);
+                    document.getElementById('verificationSection').style.display = 'block';
+                });
+        }
+
+        function verifyAndRegister() {
+            const enteredCode = document.getElementById('verificationCode').value;
+            if (!pendingVerification || !pendingVerification.code) return showToast("Request a code first", 'error');
+            if (enteredCode !== pendingVerification.code) return showToast("Invalid verification code", 'error');
+            const newUser = { id: users.length + 1, name: pendingVerification.name, email: pendingVerification.email, password: pendingVerification.password, role: "user" };
+            users.push(newUser);
+            saveUsers();
+            showToast("Registration successful! Please login.", 'success');
+            closeModal();
+            pendingVerification = null;
+            document.getElementById('verificationSection').style.display = 'none';
+            document.getElementById('regName').value = ''; document.getElementById('regEmail').value = ''; document.getElementById('regPassword').value = '';
+            showLogin();
+        }
+
+        // Load from localStorage
+        function loadSharedData() {
+            const storedUsers = localStorage.getItem('milkmart_users');
+            if (storedUsers) {
+                users = JSON.parse(storedUsers);
+            } else {
+                users = [
+                    { id: 1, name: "Admin", email: "admin@milkmart.com", password: "admin123", role: "admin" },
+                    { id: 2, name: "Delivery Boy", email: "delivery@milkmart.com", password: "delivery123", role: "delivery" }
+                ];
+                localStorage.setItem('milkmart_users', JSON.stringify(users));
+            }
+
+            const storedProducts = localStorage.getItem('milkmart_products');
+            if (storedProducts) {
+                products = JSON.parse(storedProducts);
+            } else {
+                products = [
+                    { id: 1, name: "Fresh Cow Milk", price: 60, unit: "1 litre", category: "Cow Milk", stock: 50, image: "https://images.pexels.com/photos/2398220/pexels-photo-2398220.jpeg?auto=compress&cs=tinysrgb&w=400", description: "Pure, pasteurized cow milk." },
+                    { id: 2, name: "Organic Buffalo Milk", price: 80, unit: "1 litre", category: "Buffalo Milk", stock: 30, image: "https://images.pexels.com/photos/372882/pexels-photo-372882.jpeg?auto=compress&cs=tinysrgb&w=400", description: "Rich and creamy." },
+                    { id: 3, name: "Almond Milk", price: 120, unit: "1 litre", category: "Plant Milk", stock: 20, image: "https://images.pexels.com/photos/374078/pexels-photo-374078.jpeg?auto=compress&cs=tinysrgb&w=400", description: "Dairy-free alternative." },
+                    { id: 4, name: "Soy Milk", price: 90, unit: "1 litre", category: "Plant Milk", stock: 25, image: "https://images.pexels.com/photos/4123038/pexels-photo-4123038.jpeg?auto=compress&cs=tinysrgb&w=400", description: "High protein." }
+                ];
+                localStorage.setItem('milkmart_products', JSON.stringify(products));
+            }
+
+            const storedOrders = localStorage.getItem('milkmart_orders');
+            if (storedOrders) orders = JSON.parse(storedOrders);
+            else orders = [];
+
+            const storedCart = localStorage.getItem('milkmart_cart');
+            if (storedCart) cart = JSON.parse(storedCart);
+            else cart = [];
+
+            const storedWishlist = localStorage.getItem('milkmart_wishlist');
+            if (storedWishlist) wishlist = JSON.parse(storedWishlist);
+            else wishlist = [];
+
+            const storedUnread = localStorage.getItem('milkmart_unread_orders');
+            if (storedUnread) unreadOrderCount = parseInt(storedUnread) || 0;
+            else unreadOrderCount = 0;
+        }
+
+        function saveUsers() { localStorage.setItem('milkmart_users', JSON.stringify(users)); }
+        function saveProducts() { localStorage.setItem('milkmart_products', JSON.stringify(products)); }
+        function saveOrders() { localStorage.setItem('milkmart_orders', JSON.stringify(orders)); }
+        function saveCart() { localStorage.setItem('milkmart_cart', JSON.stringify(cart)); updateCartBadge(); }
+        function saveWishlist() { localStorage.setItem('milkmart_wishlist', JSON.stringify(wishlist)); updateWishlistBadge(); }
+        function saveUnreadCount() { localStorage.setItem('milkmart_unread_orders', unreadOrderCount); }
+
+        function loadSession() {
+            const session = sessionStorage.getItem('milkmart_session');
+            if (session) {
+                const parsed = JSON.parse(session);
+                currentUser = parsed.user;
+                adminMode = parsed.adminMode || false;
+            } else {
+                currentUser = null;
+                adminMode = false;
+            }
+        }
+        function saveSession() { sessionStorage.setItem('milkmart_session', JSON.stringify({ user: currentUser, adminMode: adminMode })); }
+        function clearSession() { sessionStorage.removeItem('milkmart_session'); currentUser = null; adminMode = false; }
+
+        function updateCartBadge() {
+            const total = cart.reduce((sum, i) => sum + i.quantity, 0);
+            const badge = document.getElementById('cartCount');
+            if (badge) badge.innerText = total;
+        }
+        function updateWishlistBadge() { document.getElementById('wishlistCount').innerText = wishlist.length; }
+
+        function updateUIForAuth() {
+            const loginBtn = document.getElementById('loginBtn');
+            const logoutBtn = document.getElementById('logoutBtn');
+            const adminBtn = document.getElementById('adminBtn');
+            const navHome = document.getElementById('navHome');
+            const navCart = document.getElementById('navCart');
+            const navWishlist = document.getElementById('navWishlist');
+            const navOrders = document.getElementById('navOrders');
+            if (currentUser) {
+                loginBtn.classList.add('hidden');
+                logoutBtn.classList.remove('hidden');
+                if (currentUser.role === 'admin') adminBtn.classList.remove('hidden');
+                else adminBtn.classList.add('hidden');
+                if (currentUser.role === 'delivery') {
+                    navHome.classList.add('hidden');
+                    navCart.classList.add('hidden');
+                    navWishlist.classList.add('hidden');
+                    navOrders.classList.add('hidden');
+                    adminBtn.classList.add('hidden');
+                } else {
+                    navHome.classList.remove('hidden');
+                    navCart.classList.remove('hidden');
+                    navWishlist.classList.remove('hidden');
+                    navOrders.classList.remove('hidden');
+                }
+            } else {
+                loginBtn.classList.remove('hidden');
+                logoutBtn.classList.add('hidden');
+                adminBtn.classList.add('hidden');
+                navHome.classList.remove('hidden');
+                navCart.classList.remove('hidden');
+                navWishlist.classList.remove('hidden');
+                navOrders.classList.remove('hidden');
+            }
+            if (adminMode && currentUser && currentUser.role === 'admin') {
+                navHome.classList.add('hidden');
+                navCart.classList.add('hidden');
+                navWishlist.classList.add('hidden');
+                navOrders.classList.add('hidden');
+                adminBtn.classList.remove('hidden');
+            }
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast bg-${type === 'success' ? 'green' : type === 'error' ? 'red' : 'blue'}-500 text-white px-4 py-2 rounded-lg shadow-lg`;
+            toast.innerText = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function render(html) { document.getElementById('app').innerHTML = html; }
+
+        // Auth
+        function doLogin() {
+            const email = document.getElementById('loginEmail').value;
+            const pwd = document.getElementById('loginPassword').value;
+            const user = users.find(u => u.email === email && u.password === pwd);
+            if (user) {
+                currentUser = { id: user.id, name: user.name, email: user.email, role: user.role };
+                adminMode = false;
+                saveSession();
+                updateUIForAuth();
+                closeModal();
+                showToast(`Welcome ${user.name}!`, 'success');
+                // Show full-screen welcome
+                showFullWelcome(user.name);
+                if (currentUser.role === 'delivery') {
+                    showDeliveryDashboard();
+                } else if (currentUser.role === 'admin') {
+                    showHome();
+                } else {
+                    showHome();
+                }
+            } else showToast("Invalid email or password.", 'error');
+        }
+        function showFullWelcome(name) {
+            const welcomeDiv = document.createElement('div');
+            welcomeDiv.className = 'full-page-welcome';
+            welcomeDiv.innerHTML = `<div class="text-center text-white"><i class="fas fa-tint text-6xl mb-4"></i><h1 class="text-5xl font-bold mb-2">Welcome to MilkMart!</h1><p class="text-2xl">${name}</p><p class="text-xl mt-4">Your fresh milk journey begins now.</p></div>`;
+            document.body.appendChild(welcomeDiv);
+            setTimeout(() => welcomeDiv.remove(), 2000);
+        }
+        function showThankYou() {
+            const thanksDiv = document.createElement('div');
+            thanksDiv.className = 'full-page-thankyou';
+            thanksDiv.innerHTML = `<div class="text-center text-white"><i class="fas fa-check-circle text-6xl mb-4"></i><h1 class="text-5xl font-bold mb-2">Thank You!</h1><p class="text-2xl">Your order has been delivered.</p><p class="text-xl mt-4">We hope you enjoy our milk.</p></div>`;
+            document.body.appendChild(thanksDiv);
+            setTimeout(() => thanksDiv.remove(), 2000);
+        }
+        function logout() { clearSession(); currentUser = null; adminMode = false; updateUIForAuth(); showHome(); showToast("Logged out", 'success'); }
+        function showLogin() { openModal('loginModal'); }
+        function showRegister() { closeModal(); openModal('registerModal'); }
+        function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+        function closeModal() { document.querySelectorAll('.modal-backdrop').forEach(m => m.classList.add('hidden')); }
+
+        // Cart functions (unchanged)
+        function addToCart(productId, quantity = 1) {
+            if (!currentUser || currentUser.role !== 'user') { showToast("Please login as customer", 'error'); return; }
+            const product = products.find(p => p.id === productId);
+            if (!product) return;
+            const existing = cart.find(i => i.id === productId);
+            if (existing) existing.quantity += quantity;
+            else cart.push({ ...product, quantity });
+            saveCart();
+            showToast("Added to cart", 'success');
+            if (document.getElementById('productGrid')) filterProducts();
+        }
+        function updateCartQty(id, newQty) {
+            if (newQty <= 0) cart = cart.filter(i => i.id !== id);
+            else { const item = cart.find(i => i.id === id); if (item) item.quantity = newQty; }
+            saveCart(); showCart();
+        }
+        function removeFromCart(id) { cart = cart.filter(i => i.id !== id); saveCart(); showCart(); }
+        function toggleWishlist(productId) {
+            if (!currentUser || currentUser.role !== 'user') { showToast("Please login as customer", 'error'); return; }
+            const product = products.find(p => p.id === productId);
+            if (!product) return;
+            const index = wishlist.findIndex(w => w.id === productId);
+            if (index === -1) { wishlist.push(product); showToast("Added to wishlist", 'success'); }
+            else { wishlist.splice(index, 1); showToast("Removed from wishlist", 'success'); }
+            saveWishlist();
+            if (document.getElementById('productGrid')) filterProducts();
+            else if (document.getElementById('app').innerHTML.includes('Wishlist')) showWishlist();
+        }
+
+        // Checkout with saved data
+        function goToCheckout() {
+            if (!currentUser || currentUser.role !== 'user') { showToast("Please login as customer", 'error'); return; }
+            if (cart.length === 0) { showToast("Cart empty", 'error'); return; }
+            const savedPhone = localStorage.getItem('milkmart_last_phone') || '';
+            const savedAddress = localStorage.getItem('milkmart_last_address') || '';
+            const savedCity = localStorage.getItem('milkmart_last_city') || '';
+            const savedPincode = localStorage.getItem('milkmart_last_pincode') || '';
+            render(`
+                <div class="max-w-2xl mx-auto bg-white rounded-xl shadow-md p-6">
+                    <h1 class="text-2xl font-bold mb-6">Checkout</h1>
+                    <form id="checkoutForm">
+                        <div class="mb-4"><label class="block font-medium mb-1">Full Name</label><input type="text" id="fullName" value="${currentUser.name}" class="w-full border rounded-lg p-2" required></div>
+                        <div class="mb-4"><label class="block font-medium mb-1">Phone Number</label><input type="tel" id="phone" placeholder="9876543210" class="w-full border rounded-lg p-2" value="${savedPhone}" required></div>
+                        <div class="mb-4"><label class="block font-medium mb-1">Address</label><textarea id="address" rows="2" class="w-full border rounded-lg p-2" required placeholder="Street, area, landmark">${savedAddress}</textarea><button type="button" onclick="getLiveLocation()" class="mt-2 bg-blue-600 text-white px-3 py-1 rounded text-sm"><i class="fas fa-map-marker-alt"></i> Get My Live Location</button><div id="map" style="height: 200px; display: none;"></div></div>
+                        <div class="grid grid-cols-2 gap-4 mb-4"><div><label class="block font-medium mb-1">City</label><input type="text" id="city" class="w-full border rounded-lg p-2" value="${savedCity}" required></div><div><label class="block font-medium mb-1">Pincode</label><input type="text" id="pincode" class="w-full border rounded-lg p-2" value="${savedPincode}" required></div></div>
+                        <div class="mb-6"><label class="block font-medium mb-1">Payment Method</label><select id="paymentMethod" class="w-full border rounded-lg p-2"><option value="COD">Cash on Delivery</option><option value="Online">Online (Demo)</option></select></div>
+                        <button type="button" onclick="placeOrder()" class="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700">Place Order (₹${cart.reduce((s,i)=>s+i.price*i.quantity,0)})</button>
+                    </form>
+                </div>
+            `);
+        }
+        function getLiveLocation() {
+            if (!navigator.geolocation) { showToast("Geolocation not supported", 'error'); return; }
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const lat = position.coords.latitude, lng = position.coords.longitude;
+                    currentLocation = { lat, lng };
+                    showToast("Location fetched!", 'success');
+                    const mapDiv = document.getElementById('map');
+                    mapDiv.style.display = 'block';
+                    if (map) map.remove();
+                    map = L.map('map').setView([lat, lng], 15);
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors' }).addTo(map);
+                    if (marker) map.removeLayer(marker);
+                    marker = L.marker([lat, lng]).addTo(map);
+                    document.getElementById('address').value = `Location: ${lat.toFixed(6)}, ${lng.toFixed(6)} (approx)`;
+                },
+                () => showToast("Could not get location.", 'error')
+            );
+        }
+        function placeOrder() {
+            const fullName = document.getElementById('fullName').value;
+            const phone = document.getElementById('phone').value;
+            const address = document.getElementById('address').value;
+            const city = document.getElementById('city').value;
+            const pincode = document.getElementById('pincode').value;
+            const paymentMethod = document.getElementById('paymentMethod').value;
+            if (!address || !city || !pincode) return showToast("Address required", 'error');
+            if (!phone) return showToast("Phone number required", 'error');
+            localStorage.setItem('milkmart_last_phone', phone);
+            localStorage.setItem('milkmart_last_address', address);
+            localStorage.setItem('milkmart_last_city', city);
+            localStorage.setItem('milkmart_last_pincode', pincode);
+            const total = cart.reduce((s,i)=>s + i.price*i.quantity,0);
+            const newOrder = {
+                id: orders.length + 1,
+                userId: currentUser.id,
+                userName: fullName,
+                phone: phone,
+                items: cart.map(item => ({ id: item.id, name: item.name, price: item.price, quantity: item.quantity, unit: item.unit })),
+                total: total,
+                address: { address, city, pincode },
+                location: currentLocation,
+                paymentMethod,
+                status: "pending",
+                assignedTo: null,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
+            orders.push(newOrder);
+            saveOrders();
+            cart = [];
+            saveCart();
+            unreadOrderCount++;
+            saveUnreadCount();
+            showToast("Order placed! Status: Pending", 'success');
+            localStorage.setItem('milkmart_new_order', 'true');
+            localStorage.setItem('milkmart_new_order_details', JSON.stringify({ id: newOrder.id, user: fullName, total }));
+            showOrders();
+        }
+
+        function showOrders() {
+            if (!currentUser || currentUser.role !== 'user') {
+                render(`<div class="text-center py-10"><p class="text-gray-500">Please login as customer.</p><button onclick="showLogin()" class="mt-4 bg-green-600 text-white px-4 py-2 rounded">Login</button></div>`);
+                return;
+            }
+            const userOrders = orders.filter(o => o.userId === currentUser.id);
+            if (userOrders.length === 0) {
+                render(`<div class="text-center py-10"><p class="text-gray-500">No orders yet.</p><button onclick="showHome()" class="mt-4 bg-green-600 text-white px-4 py-2 rounded">Shop Now</button></div>`);
+                return;
+            }
+            render(`
+                <div class="flex justify-between items-center mb-6">
+                    <h1 class="text-2xl font-bold">My Orders</h1>
+                    <button onclick="showOrders()" class="bg-gray-200 px-4 py-2 rounded-lg hover:bg-gray-300"><i class="fas fa-sync-alt"></i> Refresh</button>
+                </div>
+                <div class="space-y-6">
+                    ${userOrders.sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(order => `
+                        <div class="bg-white rounded-xl shadow-md p-6">
+                            <div class="flex flex-wrap justify-between items-start mb-4">
+                                <div><p class="text-sm text-gray-500">Order #${order.id}</p><p class="text-sm text-gray-500">${new Date(order.createdAt).toLocaleString()}</p></div>
+                                <span class="order-status-badge ${getStatusClass(order.status)}">${order.status.toUpperCase()}</span>
+                            </div>
+                            <div class="border-t border-b py-2 my-2">${order.items.map(item => `<div class="flex justify-between py-1"><span>${item.name} x ${item.quantity}</span><span>₹${item.price * item.quantity}</span></div>`).join('')}</div>
+                            <div class="flex justify-between font-bold mt-2"><span>Total</span><span>₹${order.total}</span></div>
+                            <div class="text-sm text-gray-600 mt-3"><i class="fas fa-map-marker-alt"></i> ${order.address.address}, ${order.address.city} - ${order.address.pincode}<br><i class="fas fa-phone"></i> ${order.phone}<br>${order.location ? `<i class="fas fa-globe"></i> Location: ${order.location.lat.toFixed(4)}, ${order.location.lng.toFixed(4)}` : ''}<br>Payment: ${order.paymentMethod}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            `);
+        }
+
+        function getStatusClass(status) {
+            if (status === 'pending') return 'status-pending';
+            if (status === 'shipped') return 'status-shipped';
+            return 'status-delivered';
+        }
+
+        function showCart() {
+            if (!currentUser || currentUser.role !== 'user') { showToast("Only customers can view cart", 'error'); return; }
+            if (cart.length === 0) { render(`<div class="text-center py-10"><p class="text-gray-500">Cart empty.</p><button onclick="showHome()" class="mt-4 bg-green-600 text-white px-4 py-2 rounded">Shop</button></div>`); return; }
+            let total = cart.reduce((s,i)=>s + i.price*i.quantity,0);
+            render(`
+                <h1 class="text-2xl font-bold mb-6">Cart</h1>
+                <div class="bg-white rounded-xl shadow-md overflow-hidden">
+                    <div class="divide-y">${cart.map(item => `<div class="p-4 flex flex-wrap items-center gap-4"><img src="${item.image}" class="w-16 h-16 object-cover rounded"><div class="flex-1"><h3 class="font-semibold">${item.name}</h3><p class="text-sm">₹${item.price} / ${item.unit}</p></div><div class="flex items-center gap-2"><button onclick="updateCartQty(${item.id}, ${item.quantity-1})" class="bg-gray-200 w-8 h-8 rounded-full">-</button><span>${item.quantity}</span><button onclick="updateCartQty(${item.id}, ${item.quantity+1})" class="bg-gray-200 w-8 h-8 rounded-full">+</button></div><div class="w-24 text-right">₹${item.price * item.quantity}</div><button onclick="removeFromCart(${item.id})" class="text-red-500"><i class="fas fa-trash-alt"></i></button></div>`).join('')}</div>
+                    <div class="bg-gray-50 p-4 flex justify-between"><span class="font-bold">Total</span><span class="font-bold">₹${total}</span></div>
+                    <div class="p-4 text-right"><button onclick="goToCheckout()" class="bg-green-600 text-white px-6 py-2 rounded">Checkout</button></div>
+                </div>
+            `);
+        }
+
+        function showWishlist() {
+            if (!currentUser || currentUser.role !== 'user') { showToast("Only customers can view wishlist", 'error'); return; }
+            if (wishlist.length === 0) { render(`<div class="text-center py-10"><p class="text-gray-500">Wishlist empty.</p><button onclick="showHome()" class="mt-4 bg-green-600 text-white px-4 py-2 rounded">Browse</button></div>`); return; }
+            render(`
+                <h1 class="text-2xl font-bold mb-6">Wishlist</h1>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">${wishlist.map(p => `<div class="bg-white rounded-xl shadow-md overflow-hidden product-card"><img src="${p.image}" class="w-full h-48 object-cover"><div class="p-4"><h3 class="font-semibold">${p.name}</h3><p>₹${p.price} / ${p.unit}</p><div class="flex gap-2 mt-4"><button onclick="addToCart(${p.id})" class="flex-1 bg-green-600 text-white py-1 rounded">Add to Cart</button><button onclick="toggleWishlist(${p.id})" class="text-pink-500"><i class="fas fa-heart"></i></button></div></div></div>`).join('')}</div>
+            `);
+        }
+
+        // Home page with search & filter
+        function showHome() {
+            if (currentUser && currentUser.role === 'delivery') { showDeliveryDashboard(); return; }
+            if (currentUser && currentUser.role === 'admin' && adminMode) { showAdminDashboard(); return; }
+            render(`
+                <div class="mb-8 flex flex-col sm:flex-row gap-4">
+                    <input type="text" id="searchInput" placeholder="Search milk products..." class="flex-1 border rounded-lg px-4 py-2">
+                    <select id="categoryFilter" class="border rounded-lg px-4 py-2 bg-white">
+                        <option value="">All Categories</option>
+                        ${[...new Set(products.map(p => p.category))].map(cat => `<option value="${cat}">${cat}</option>`).join('')}
+                    </select>
+                    <button onclick="filterProducts()" class="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700">Filter</button>
+                </div>
+                <div id="productGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
+            `);
+            filterProducts();
+        }
+
+        function filterProducts() {
+            const search = document.getElementById('searchInput') ? document.getElementById('searchInput').value.toLowerCase() : '';
+            const category = document.getElementById('categoryFilter') ? document.getElementById('categoryFilter').value : '';
+            let filtered = products.filter(p => p.name.toLowerCase().includes(search) || p.description.toLowerCase().includes(search));
+            if (category) filtered = filtered.filter(p => p.category === category);
+            const grid = document.getElementById('productGrid');
+            if (!grid) return;
+            if (filtered.length === 0) { grid.innerHTML = '<p class="col-span-full text-center text-gray-500">No products found.</p>'; return; }
+            grid.innerHTML = filtered.map(p => `
+                <div class="bg-white rounded-xl shadow-md overflow-hidden product-card">
+                    <img src="${p.image}" class="w-full h-48 object-cover">
+                    <div class="p-4">
+                        <h3 class="font-bold">${p.name}</h3>
+                        <p class="text-gray-600">₹${p.price} / ${p.unit}</p>
+                        <div class="flex justify-between mt-4">
+                            <button onclick="addToCart(${p.id})" class="bg-green-600 text-white px-3 py-1 rounded">Add to Cart</button>
+                            <button onclick="toggleWishlist(${p.id})" class="text-pink-500 text-xl">${wishlist.some(w=>w.id===p.id)?'❤️':'🤍'}</button>
+                            <button onclick="showProductDetail(${p.id})" class="text-green-600">View</button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function showProductDetail(id) {
+            const p = products.find(p => p.id === id);
+            if (!p) return;
+            render(`
+                <div class="max-w-2xl mx-auto bg-white rounded-xl shadow-md p-6">
+                    <img src="${p.image}" class="w-full h-64 object-cover rounded">
+                    <h1 class="text-2xl font-bold mt-4">${p.name}</h1>
+                    <p class="text-gray-600">₹${p.price} / ${p.unit}</p>
+                    <p class="mt-2">${p.description}</p>
+                    <div class="flex gap-4 mt-6">
+                        <button onclick="addToCart(${p.id})" class="bg-green-600 text-white px-6 py-2 rounded">Add to Cart</button>
+                        <button onclick="toggleWishlist(${p.id})" class="border border-pink-500 text-pink-500 px-4 py-2 rounded">${wishlist.some(w=>w.id===p.id)?'Remove from Wishlist':'Add to Wishlist'}</button>
+                        <button onclick="showHome()" class="bg-gray-200 px-4 py-2 rounded">Back</button>
+                    </div>
+                </div>
+            `);
+        }
+
+        // Delivery Dashboard with assignment
+        function showDeliveryDashboard() {
+            if (!currentUser || currentUser.role !== 'delivery') return;
+            const visibleOrders = orders.filter(o => o.status !== 'delivered' && (o.assignedTo === null || o.assignedTo === currentUser.id));
+            render(`
+                <div class="bg-white rounded-xl shadow-md p-6">
+                    <div class="flex justify-between items-center mb-6">
+                        <h1 class="text-2xl font-bold">Delivery Dashboard</h1>
+                        <button onclick="logout()" class="bg-red-600 text-white px-4 py-2 rounded">Logout</button>
+                    </div>
+                    <div class="mb-4 text-gray-600">Welcome, ${currentUser.name}!</div>
+                    <div id="deliveryOrdersList" class="space-y-4">
+                        ${visibleOrders.length === 0 ? '<p class="text-center text-gray-500">No orders available for delivery.</p>' : visibleOrders.map(order => `
+                            <div class="delivery-order-card border rounded-lg p-4 shadow-sm">
+                                <div class="flex flex-wrap justify-between">
+                                    <div>
+                                        <p class="font-semibold">Order #${order.id}</p>
+                                        <p>${order.userName}</p>
+                                        <p><i class="fas fa-phone"></i> ${order.phone} <a href="tel:${order.phone}" class="call-btn inline-block ml-2 bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs"><i class="fas fa-phone-alt"></i> Call</a></p>
+                                        <p><i class="fas fa-map-marker-alt"></i> ${order.address.address}, ${order.address.city} - ${order.address.pincode}</p>
+                                        ${order.location ? `<p><i class="fas fa-globe"></i> Lat: ${order.location.lat.toFixed(4)}, Lng: ${order.location.lng.toFixed(4)}</p>` : ''}
+                                        <button onclick="openGoogleMaps(${order.location ? order.location.lat : 0}, ${order.location ? order.location.lng : 0}, '${order.address.address}')" class="direction-btn mt-2 bg-blue-500 text-white px-3 py-1 rounded text-xs"><i class="fas fa-directions"></i> Get Directions</button>
+                                    </div>
+                                    <div class="text-right">
+                                        <span class="order-status-badge ${getStatusClass(order.status)}">${order.status.toUpperCase()}</span>
+                                        <div class="mt-2">
+                                            ${order.status === 'pending' && order.assignedTo === null ? `<button onclick="pickupOrder(${order.id})" class="pickup-btn bg-yellow-500 text-white px-3 py-1 text-xs rounded"><i class="fas fa-hand-holding"></i> Pickup Order</button><br>` : ''}
+                                            <select id="delivery-status-${order.id}" class="border rounded p-1 text-sm mt-1" ${order.status === 'delivered' ? 'disabled' : ''}>
+                                                <option value="pending" ${order.status==='pending'?'selected':''}>Pending</option>
+                                                <option value="shipped" ${order.status==='shipped'?'selected':''}>Shipped</option>
+                                                <option value="delivered" ${order.status==='delivered'?'selected':''}>Delivered</option>
+                                            </select>
+                                            <button onclick="updateDeliveryStatus(${order.id})" class="ml-2 bg-blue-500 text-white px-2 py-1 text-xs rounded" ${order.status === 'delivered' ? 'disabled' : ''}>Update</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mt-2 text-sm">Items: ${order.items.map(i => `${i.name} x${i.quantity}`).join(', ')} | Total: ₹${order.total}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `);
+        }
+
+        function pickupOrder(orderId) {
+            const order = orders.find(o => o.id === orderId);
+            if (order && order.status === 'pending' && order.assignedTo === null) {
+                order.assignedTo = currentUser.id;
+                saveOrders();
+                showToast("Order picked up successfully!", 'success');
+                showDeliveryDashboard();
+            } else {
+                showToast("Order already assigned or not pending.", 'error');
+            }
+        }
+
+        function updateDeliveryStatus(orderId) {
+            const select = document.getElementById(`delivery-status-${orderId}`);
+            if (!select) return;
+            const newStatus = select.value;
+            const order = orders.find(o => o.id === orderId);
+            if (!order) return;
+            if (newStatus === 'shipped' && order.status === 'pending') {
+                if (order.assignedTo === null) order.assignedTo = currentUser.id;
+                else if (order.assignedTo !== currentUser.id) {
+                    showToast("This order is already assigned to another delivery boy.", 'error');
+                    return;
+                }
+            }
+            order.status = newStatus;
+            order.updatedAt = new Date().toISOString();
+            if (newStatus === 'delivered') {
+                showThankYou();
+                order.deliveredBy = currentUser.id;
+            }
+            saveOrders();
+            showToast(`Order #${orderId} status updated to ${newStatus}`, 'success');
+            showDeliveryDashboard();
+        }
+
+        function openGoogleMaps(lat, lng, address) {
+            if (lat && lng && lat !== 0) window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank');
+            else window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`, '_blank');
+        }
+
+        // Admin Dashboard
+        let activeAdminTab = 'products';
+        function toggleAdmin() {
+            if (!currentUser || currentUser.role !== 'admin') { showToast("Admin access required", 'error'); return; }
+            adminMode = !adminMode;
+            saveSession();
+            updateUIForAuth();
+            if (adminMode) { if (Notification.permission === 'default') Notification.requestPermission(); showAdminDashboard(); }
+            else showHome();
+        }
+        function showAdminDashboard() {
+            let newOrderFlag = false;
+            if (localStorage.getItem('milkmart_new_order') === 'true') {
+                newOrderFlag = true;
+                localStorage.removeItem('milkmart_new_order');
+                localStorage.removeItem('milkmart_new_order_details');
+            }
+            const totalUsers = users.filter(u => u.role === 'user').length;
+            const deliveryBoys = users.filter(u => u.role === 'delivery').length;
+            const deliveredOrders = orders.filter(o => o.status === 'delivered').length;
+            const deliveryStats = users.filter(u => u.role === 'delivery').map(del => {
+                const deliveredCount = orders.filter(o => o.status === 'delivered' && o.assignedTo === del.id).length;
+                const pendingCount = orders.filter(o => o.status !== 'delivered' && o.assignedTo === del.id).length;
+                return { name: del.name, delivered: deliveredCount, pending: pendingCount };
+            });
+            render(`
+                <div class="bg-white rounded-xl shadow-md p-6">
+                    <div class="mb-4 p-3 bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg border-l-4 border-orange-500 flex items-center justify-between">
+                        <div><span class="font-semibold"><i class="fas fa-bell"></i> New Orders</span><span class="ml-2 bg-red-500 text-white px-2 py-1 rounded-full text-sm notification-badge">${unreadOrderCount}</span></div>
+                        <button onclick="resetUnreadOrders()" class="text-sm bg-gray-200 px-2 py-1 rounded">Mark as read</button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+                        <div class="bg-gradient-to-br from-green-50 to-green-100 p-4 rounded shadow"><i class="fas fa-users text-2xl"></i><p class="text-2xl font-bold">${totalUsers}</p><p>Customers</p></div>
+                        <div class="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded shadow"><i class="fas fa-truck text-2xl"></i><p class="text-2xl font-bold">${deliveryBoys}</p><p>Delivery Boys</p></div>
+                        <div class="bg-gradient-to-br from-purple-50 to-purple-100 p-4 rounded shadow"><i class="fas fa-boxes text-2xl"></i><p class="text-2xl font-bold">${products.length}</p><p>Products</p></div>
+                        <div class="bg-gradient-to-br from-yellow-50 to-yellow-100 p-4 rounded shadow"><i class="fas fa-shopping-cart text-2xl"></i><p class="text-2xl font-bold">${orders.length}</p><p>Orders</p></div>
+                        <div class="bg-gradient-to-br from-red-50 to-red-100 p-4 rounded shadow"><i class="fas fa-check-circle text-2xl"></i><p class="text-2xl font-bold">${deliveredOrders}</p><p>Delivered</p></div>
+                    </div>
+                    ${deliveryBoys > 0 ? `<div class="mb-6 p-4 bg-gray-50 rounded shadow"><h3 class="font-bold mb-2">Delivery Performance</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-4">${deliveryStats.map(d => `<div class="border p-2 rounded"><span class="font-semibold">${d.name}</span><br>Delivered: ${d.delivered} | Pending: ${d.pending}</div>`).join('')}</div></div>` : ''}
+                    <div class="flex border-b mb-6">
+                        <button id="tabProducts" onclick="setAdminTab('products')" class="admin-tab px-4 py-2 font-semibold ${activeAdminTab === 'products' ? 'active bg-green-600 text-white rounded-t' : 'text-gray-600'}">📦 Products</button>
+                        <button id="tabOrders" onclick="setAdminTab('orders')" class="admin-tab px-4 py-2 font-semibold ${activeAdminTab === 'orders' ? 'active bg-green-600 text-white rounded-t' : 'text-gray-600'}">📋 Orders</button>
+                        <button id="tabUsers" onclick="setAdminTab('users')" class="admin-tab px-4 py-2 font-semibold ${activeAdminTab === 'users' ? 'active bg-green-600 text-white rounded-t' : 'text-gray-600'}">👥 Users</button>
+                        <button id="tabAccounts" onclick="setAdminTab('accounts')" class="admin-tab px-4 py-2 font-semibold ${activeAdminTab === 'accounts' ? 'active bg-green-600 text-white rounded-t' : 'text-gray-600'}">➕ Create Account</button>
+                    </div>
+                    <div id="adminTabContent">${activeAdminTab === 'products' ? renderProductsTab() : activeAdminTab === 'orders' ? renderOrdersTab() : activeAdminTab === 'users' ? renderUsersTab() : renderCreateAccountTab()}</div>
+                </div>
+            `);
+        }
+        function renderCreateAccountTab() {
+            return `
+                <h2 class="text-xl font-semibold mb-4">Create New Account</h2>
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <div class="mb-3"><label class="block font-medium">Name</label><input type="text" id="newAccName" class="border rounded p-2 w-full"></div>
+                    <div class="mb-3"><label class="block font-medium">Email</label><input type="email" id="newAccEmail" class="border rounded p-2 w-full"></div>
+                    <div class="mb-3"><label class="block font-medium">Password</label><input type="text" id="newAccPassword" class="border rounded p-2 w-full"></div>
+                    <div class="mb-3"><label class="block font-medium">Role</label><select id="newAccRole" class="border rounded p-2 w-full"><option value="admin">Admin</option><option value="delivery">Delivery Boy</option><option value="user">Customer</option></select></div>
+                    <button onclick="createNewAccount()" class="bg-green-600 text-white px-4 py-2 rounded">Create Account</button>
+                </div>
+            `;
+        }
+        function createNewAccount() {
+            const name = document.getElementById('newAccName').value;
+            const email = document.getElementById('newAccEmail').value;
+            const password = document.getElementById('newAccPassword').value;
+            const role = document.getElementById('newAccRole').value;
+            if (!name || !email || !password) return showToast("All fields required", 'error');
+            if (users.find(u => u.email === email)) return showToast("Email already exists", 'error');
+            users.push({ id: users.length + 1, name, email, password, role });
+            saveUsers();
+            showToast(`Account created for ${name} (${role})`, 'success');
+            setAdminTab('users');
+        }
+        function setAdminTab(tab) { activeAdminTab = tab; showAdminDashboard(); }
+        function renderProductsTab() {
+            return `
+                <h2 class="text-xl font-semibold mb-4">Manage Products</h2>
+                <form id="adminProductForm" class="bg-gray-50 p-4 rounded-lg mb-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input type="text" id="prodName" placeholder="Name" class="border rounded p-2"><input type="number" id="prodPrice" placeholder="Price" class="border rounded p-2"><input type="text" id="prodUnit" placeholder="Unit" class="border rounded p-2"><input type="text" id="prodCategory" placeholder="Category" class="border rounded p-2"><input type="number" id="prodStock" placeholder="Stock" class="border rounded p-2"><div><input type="text" id="prodImage" placeholder="Image URL" class="border rounded p-2 w-full mb-1"><input type="file" id="imageFile" accept="image/*" class="border rounded p-1 w-full text-sm"></div><textarea id="prodDesc" placeholder="Description" rows="2" class="border rounded p-2 col-span-2"></textarea>
+                    </div>
+                    <div class="mt-3 flex gap-2"><button type="button" onclick="saveProduct()" class="bg-green-600 text-white px-4 py-2 rounded">Save</button><button type="button" onclick="clearProductForm()" class="bg-gray-400 text-white px-4 py-2 rounded">Clear</button></div>
+                    <input type="hidden" id="editId" value="">
+                </form>
+                <div class="overflow-x-auto"><table class="min-w-full admin-table bg-white rounded shadow"><thead class="bg-gray-100"><tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th>Actions</th></tr></thead><tbody>${products.map(p => `<tr><td>${p.id}</td><td>${p.name}</td><td>₹${p.price}</td><td>${p.stock}</td><td><button onclick="editProduct(${p.id})" class="text-green-600 mr-2">Edit</button><button onclick="deleteProduct(${p.id})" class="text-red-600">Delete</button></td></tr>`).join('')}</tbody></table></div>
+            `;
+        }
+        function renderOrdersTab() {
+            if (unreadOrderCount > 0) { unreadOrderCount = 0; saveUnreadCount(); }
+            return `<h2 class="text-xl font-semibold mb-4">Manage Orders</h2><div class="overflow-x-auto"><table class="min-w-full admin-table bg-white rounded shadow"><thead class="bg-gray-100"><tr><th>ID</th><th>User</th><th>Phone</th><th>Total</th><th>Status</th><th>Assigned To</th><th>Action</th></tr></thead><tbody>${orders.map(order => {
+                const assignedBoy = users.find(u => u.id === order.assignedTo);
+                const assignedName = assignedBoy ? assignedBoy.name : 'Unassigned';
+                return `<tr><td>${order.id}</td><td>${order.userName}</td><td><a href="tel:${order.phone}" class="text-blue-600">${order.phone}</a></td><td>₹${order.total}</td><td><span class="order-status-badge ${getStatusClass(order.status)}">${order.status}</span></td><td>${assignedName}</td><td><select id="admin-status-${order.id}" class="border rounded p-1 text-sm"><option value="pending" ${order.status==='pending'?'selected':''}>Pending</option><option value="shipped" ${order.status==='shipped'?'selected':''}>Shipped</option><option value="delivered" ${order.status==='delivered'?'selected':''}>Delivered</option></select><button onclick="updateAdminOrderStatus(${order.id})" class="ml-2 bg-green-500 text-white px-2 py-1 text-xs rounded">Update</button></td></tr>`;
+            }).join('')}</tbody></table></div>`;
+        }
+        function renderUsersTab() {
+            return `<h2 class="text-xl font-semibold mb-4">Registered Users</h2><div class="overflow-x-auto"><table class="min-w-full admin-table bg-white rounded shadow"><thead class="bg-gray-100"><tr><th>ID</th><th>Name</th><th>Email</th><th>Password</th><th>Role</th></tr></thead><tbody>${users.map(u => `<tr><td>${u.id}</td><td>${u.name}</td><td>${u.email}</td><td>${u.password}</td><td>${u.role}</td></tr>`).join('')}</tbody></table></div>`;
+        }
+        function resetUnreadOrders() { unreadOrderCount = 0; saveUnreadCount(); showAdminDashboard(); }
+        function updateAdminOrderStatus(orderId) {
+            const select = document.getElementById(`admin-status-${orderId}`);
+            const newStatus = select.value;
+            const order = orders.find(o => o.id === orderId);
+            if (order) { order.status = newStatus; order.updatedAt = new Date().toISOString(); saveOrders(); showToast(`Order #${orderId} status updated`, 'success'); showAdminDashboard(); }
+        }
+        function clearProductForm() {
+            document.getElementById('prodName').value = ''; document.getElementById('prodPrice').value = ''; document.getElementById('prodUnit').value = '';
+            document.getElementById('prodCategory').value = ''; document.getElementById('prodStock').value = ''; document.getElementById('prodImage').value = '';
+            document.getElementById('prodDesc').value = ''; document.getElementById('editId').value = ''; document.getElementById('imageFile').value = '';
+        }
+        function editProduct(id) {
+            const p = products.find(p => p.id === id);
+            if (!p) return;
+            document.getElementById('editId').value = p.id; document.getElementById('prodName').value = p.name; document.getElementById('prodPrice').value = p.price;
+            document.getElementById('prodUnit').value = p.unit; document.getElementById('prodCategory').value = p.category; document.getElementById('prodStock').value = p.stock;
+            document.getElementById('prodImage').value = p.image; document.getElementById('prodDesc').value = p.description;
+        }
+        function saveProduct() {
+            const id = document.getElementById('editId').value, name = document.getElementById('prodName').value, price = parseFloat(document.getElementById('prodPrice').value);
+            const unit = document.getElementById('prodUnit').value, category = document.getElementById('prodCategory').value, stock = parseInt(document.getElementById('prodStock').value);
+            const image = document.getElementById('prodImage').value, description = document.getElementById('prodDesc').value;
+            if (!name || isNaN(price) || !unit || !category || isNaN(stock)) return showToast("Fill all fields", 'error');
+            if (id) {
+                const index = products.findIndex(p => p.id == id);
+                if (index !== -1) products[index] = { ...products[index], name, price, unit, category, stock, image, description };
+            } else {
+                const newId = products.length ? Math.max(...products.map(p=>p.id)) + 1 : 5;
+                products.push({ id: newId, name, price, unit, category, stock, image, description });
+            }
+            saveProducts(); clearProductForm(); showAdminDashboard(); showToast("Product saved", 'success');
+        }
+        function deleteProduct(id) {
+            if (confirm("Delete product?")) { products = products.filter(p => p.id !== id); saveProducts(); showAdminDashboard(); showToast("Product deleted", 'success'); }
+        }
+        document.addEventListener('change', function(e) {
+            if (e.target && e.target.id === 'imageFile') {
+                const file = e.target.files[0];
+                if (file) { const reader = new FileReader(); reader.onload = ev => document.getElementById('prodImage').value = ev.target.result; reader.readAsDataURL(file); }
+            }
+        });
+
+        // Initialize
+        loadSharedData();
+        loadSession();
+        updateUIForAuth();
+        if (currentUser && currentUser.role === 'delivery') showDeliveryDashboard();
+        else if (currentUser && currentUser.role === 'admin' && adminMode) showAdminDashboard();
+        else showHome();
+    </script>
+</body>
+</html>
